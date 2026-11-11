@@ -1,0 +1,42 @@
+name: anicare
+description: AniCare - Connecting Farmers to Animal Care. School pitch prototype (Android).
+publish_to: "none"
+version: 5.0.0+50
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  sqflite: ^2.3.0
+  path: ^1.9.0
+  crypto: ^3.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/img/
+  fonts:
+    - family: ZillaSlab
+      fonts:
+        - asset: assets/fonts/ZillaSlab-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/ZillaSlab-BoldItalic.ttf
+          weight: 700
+          style: italic
+    - family: DMSans
+      fonts:
+        - asset: assets/fonts/DMSans-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/DMSans-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/DMSans-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/DMSans-Bold.ttf
+          weight: 700
