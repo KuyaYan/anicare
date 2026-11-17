@@ -2,6 +2,8 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'data.dart';
 import 'auth.dart';
+import 'notifications.dart';
+import 'settings.dart';
 
 /// Colors: light = from the PPT, dark = from the dark logo.
 class C {
@@ -21,7 +23,7 @@ class C {
 }
 
 /// App version (keep in sync with pubspec.yaml)
-const String kVersion = '5.0.0';
+const String kVersion = '1.3.0';
 
 const double kHero = 138; // clear (un-blurred) part of the background
 const double kAd = 56;
@@ -51,6 +53,7 @@ ThemeData buildTheme() {
   return base.copyWith(
     colorScheme: cs,
     scaffoldBackgroundColor: C.surface,
+    canvasColor: C.surface,
     textTheme: base.textTheme.apply(fontFamily: 'DMSans', bodyColor: C.ink, displayColor: C.ink),
     primaryTextTheme: base.primaryTextTheme.apply(fontFamily: 'DMSans'),
     appBarTheme: AppBarTheme(
@@ -89,6 +92,49 @@ ThemeData buildTheme() {
     snackBarTheme: SnackBarThemeData(
         backgroundColor: C.d ? const Color(0xFFF2F5F8) : const Color(0xFF1B2733),
         contentTextStyle: TextStyle(color: C.d ? const Color(0xFF111418) : Colors.white)),
+  );
+}
+
+final messengerKey = GlobalKey<ScaffoldMessengerState>();
+final navKey = GlobalKey<NavigatorState>();
+
+/// A list you can pull down at the top to refresh (re-syncs with Supabase).
+class RList extends StatelessWidget {
+  final EdgeInsetsGeometry? padding;
+  final List<Widget> children;
+  const RList({super.key, this.padding, required this.children});
+  @override
+  Widget build(BuildContext context) => RefreshIndicator(
+        onRefresh: app.refresh,
+        child: ListView(
+            physics: const AlwaysScrollableScrollPhysics(), padding: padding, children: children),
+      );
+}
+
+/// Live password rules shown while typing.
+Widget pwChecklist(String pw) {
+  final k = PwCheck(pw);
+  Widget row(bool ok, String t) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(children: [
+          Icon(ok ? Icons.check_circle : Icons.radio_button_unchecked,
+              size: 17, color: ok ? C.green : C.ink.withAlpha(150)),
+          const SizedBox(width: 8),
+          Expanded(child: Text(t, style: TextStyle(fontSize: 12.5, fontWeight: ok ? FontWeight.w700 : FontWeight.w400))),
+        ]),
+      );
+  return Container(
+    width: double.infinity,
+    margin: const EdgeInsets.only(top: 6),
+    padding: const EdgeInsets.all(10),
+    decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(rPill)),
+    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      row(k.len, '8 to 32 characters'),
+      row(k.letter, 'At least one letter'),
+      row(k.digit, 'At least one number'),
+      row(k.symbol, 'At least one symbol, for example ! @ # %'),
+      row(k.noSpace, 'No spaces'),
+    ]),
   );
 }
 
@@ -182,7 +228,7 @@ class LogoBadge extends StatelessWidget {
       child: Container(
         width: size,
         height: size,
-        padding: EdgeInsets.all(size * (ring ? .11 : .07)),
+        padding: EdgeInsets.all(size * (ring ? .165 : .07)),
         decoration: BoxDecoration(
             color: C.logoBg,
             shape: BoxShape.circle,
@@ -207,24 +253,83 @@ class ThemeToggle extends StatelessWidget {
   }
 }
 
-PreferredSizeWidget mainBar(BuildContext c) => AppBar(
-      toolbarHeight: 72,
-      titleSpacing: 14,
-      backgroundColor: C.bar,
-      title: Row(children: [
-        const LogoBadge(46),
-        const SizedBox(width: 12),
-        Text('AniCare', style: h(24, Colors.white)),
+/// Bell with unread count (opens the notification list).
+class BellButton extends StatelessWidget {
+  const BellButton({super.key});
+  @override
+  Widget build(BuildContext context) {
+    Stamp.watch(context);
+    final n = app.unread;
+    return IconButton(
+      tooltip: 'Notifications',
+      onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const NotificationsPage())),
+      icon: Stack(clipBehavior: Clip.none, children: [
+        const Icon(Icons.notifications_outlined, color: Colors.white),
+        if (n > 0)
+          Positioned(
+            right: -6,
+            top: -6,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(color: const Color(0xFFE53935), borderRadius: BorderRadius.circular(10)),
+              child: Text(n > 9 ? '9+' : '$n',
+                  style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
+            ),
+          ),
       ]),
-      actions: [
-        const ThemeToggle(),
-        IconButton(
-            tooltip: 'Log out',
-            icon: const Icon(Icons.logout, color: Colors.white),
-            onPressed: () => signOut(c)),
-        const SizedBox(width: 4),
-      ],
     );
+  }
+}
+
+/// Cog next to the name (farmer / vet / store): opens Settings.
+Widget cogButton(BuildContext c) => Container(
+      decoration: BoxDecoration(color: C.pill, shape: BoxShape.circle),
+      child: IconButton(
+        tooltip: 'Settings',
+        icon: Icon(Icons.settings, color: C.ink),
+        onPressed: () => Navigator.push(c, MaterialPageRoute(builder: (_) => const SettingsPage())),
+      ),
+    );
+
+PreferredSizeWidget mainBar(BuildContext c) {
+  // admin only: tapping the logo 5 times unlocks the hidden Debug tab; a counter shows beside the logo
+  final admin = app.role == Role.admin;
+  final counting = admin && app.debugTaps > 0 && !app.debugUnlocked;
+  return AppBar(
+    toolbarHeight: 72,
+    titleSpacing: 14,
+    backgroundColor: C.bar,
+    title: Row(children: [
+      GestureDetector(onTap: admin ? app.logoTap : null, child: const LogoBadge(46)),
+      const SizedBox(width: 12),
+      if (counting)
+        Flexible(
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: C.amber, borderRadius: BorderRadius.circular(14)),
+            child: Row(mainAxisSize: MainAxisSize.min, children: [
+              Text('${app.tapsLeft}', style: h(20, C.onAmber)),
+              const SizedBox(width: 6),
+              Flexible(
+                  child: Text(app.tapsLeft == 1 ? 'tap to Debug' : 'taps to Debug',
+                      style: const TextStyle(color: C.onAmber, fontWeight: FontWeight.w700, fontSize: 12))),
+            ]),
+          ),
+        )
+      else
+        Text('AniCare', style: h(24, Colors.white)),
+    ]),
+    actions: [
+      const BellButton(),
+      const ThemeToggle(),
+      IconButton(
+          tooltip: 'Log out',
+          icon: const Icon(Icons.logout, color: Colors.white),
+          onPressed: () => signOut(c)),
+      const SizedBox(width: 2),
+    ],
+  );
+}
 
 PreferredSizeWidget subBar(String t, {PreferredSizeWidget? bottom}) => AppBar(
       title: Text(t),
@@ -309,25 +414,29 @@ class TPill extends StatelessWidget {
 /// Clear hero area (no blur) with text pills.
 class TopHero extends StatelessWidget {
   final String title, sub;
-  const TopHero(this.title, this.sub, {super.key});
+  final Widget? trailing; // e.g. the settings cog
+  const TopHero(this.title, this.sub, {super.key, this.trailing});
   @override
   Widget build(BuildContext context) {
     Stamp.watch(context);
     return SizedBox(
-        height: kHero,
-        width: double.infinity,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
-          child: Column(
-              mainAxisAlignment: MainAxisAlignment.end,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                TPill(title, style: h(25)),
-                const SizedBox(height: 8),
-                TPill(sub),
+      height: kHero,
+      width: double.infinity,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 14),
+        child: Column(
+            mainAxisAlignment: MainAxisAlignment.end,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                Flexible(child: TPill(title, style: h(25))),
+                if (trailing != null) ...[const SizedBox(width: 8), trailing!],
               ]),
-        ),
-      );
+              const SizedBox(height: 8),
+              TPill(sub),
+            ]),
+      ),
+    );
   }
 }
 
@@ -348,6 +457,7 @@ class Pill extends StatelessWidget {
 }
 
 Pill statusPill(BStatus s) => switch (s) {
+      BStatus.unpaid => Pill('Awaiting payment', C.brown),
       BStatus.pending => Pill('Pending', C.d ? C.amber : const Color(0xFFB87400)),
       BStatus.accepted => Pill('Accepted', C.d ? const Color(0xFF8FB0F0) : C.navy),
       BStatus.completed => Pill('Completed', C.green),

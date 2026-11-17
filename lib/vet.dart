@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'data.dart';
 import 'ui.dart';
-import 'auth.dart';
+import 'gcash.dart';
 
 // ---------------------------------------------------------------- vet shell
 class VetShell extends StatefulWidget {
@@ -40,9 +40,9 @@ class VetHome extends StatelessWidget {
         final bs = app.vetBookings;
         final pending = bs.where((b) => b.status == BStatus.pending).length;
         return Column(children: [
-          TopHero(app.me.name, '${app.me.kind} • Bunawan'),
+          TopHero(app.me.name, '${app.me.kind} • Bunawan', trailing: cogButton(c)),
           Expanded(
-            child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 16), children: [
+            child: RList(padding: const EdgeInsets.fromLTRB(12, 0, 12, 16), children: [
               Row(children: [
                 Stat('$pending', 'New requests', C.amber, fg: C.onAmber),
                 Stat('${bs.where((b) => b.status == BStatus.accepted).length}', 'Upcoming', C.navy),
@@ -65,7 +65,7 @@ class VetBookings extends StatelessWidget {
   Widget build(BuildContext context) => rx((c) => Column(children: [
         TopHero('Bookings', '${app.vetBookings.length} total • accept, confirm, record'),
         Expanded(
-          child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
+          child: RList(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
             if (app.vetBookings.isEmpty) const Box(child: Text('No bookings yet.')),
             for (final b in app.vetBookings) _card(c, b),
           ]),
@@ -134,8 +134,37 @@ class StoreShell extends StatefulWidget {
 class _StoreState extends State<StoreShell> {
   int i = 0;
   void go(int n) => setState(() => i = n);
+
+  void _askExtend() {
+    if (!app.planPrompt) return;
+    app.planPrompt = false;
+    showDialog(
+      context: context,
+      builder: (d) => AlertDialog(
+        title: Text('Your plan ends soon', style: h(20)),
+        content: Text('Your store plan ends on ${fmt(app.planUntil)}. Do you want to extend it for ₱39?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d), child: const Text('Later')),
+          FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(120, 42)),
+              onPressed: () {
+                Navigator.pop(d);
+                go(2);
+              },
+              child: const Text('Extend plan')),
+        ],
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => rx((c) => ShellBack(
+  Widget build(BuildContext context) => rx((c) {
+        if (app.planPrompt) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) _askExtend();
+          });
+        }
+        return ShellBack(
         atHome: i == 0,
         toHome: () => go(0),
         child: AppScaffold(
@@ -152,7 +181,8 @@ class _StoreState extends State<StoreShell> {
             ],
           ),
         ),
-      ));
+      );
+      });
 }
 
 class Inventory extends StatelessWidget {
@@ -161,7 +191,7 @@ class Inventory extends StatelessWidget {
   Widget build(BuildContext context) => rx((c) {
         final s = app.myStore;
         return Column(children: [
-          TopHero(s.name, s.address),
+          TopHero(s.name, s.address, trailing: cogButton(c)),
           Expanded(
             child: Scaffold(
               backgroundColor: Colors.transparent,
@@ -170,22 +200,17 @@ class Inventory extends StatelessWidget {
                   foregroundColor: C.onAmber,
                   icon: const Icon(Icons.add),
                   label: const Text('Add product'),
-                  onPressed: () async {
-                    final v = await form(c, 'Add product', ['Product name', 'Price (₱)', 'Stock'],
-                        numeric: {1, 2});
-                    if (v == null || v[0].isEmpty) return;
-                    app.addProduct(s, v[0], double.tryParse(v[1]) ?? 0, int.tryParse(v[2]) ?? 0);
-                  }),
-              body: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
+                  onPressed: () => addProductDialog(c, s)),
+              body: RList(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
                 Box(
                     child: Row(children: [
                   Pic(s.photo, w: 64, h: 64, r: 12, fallback: Icons.store),
                   const SizedBox(width: 12),
-                  Expanded(child: Text('${s.products.length} products listed', style: h(18))),
+                  Expanded(child: Text('${s.listed.length} products listed', style: h(18))),
                 ])),
-                if (s.products.isEmpty)
+                if (s.listed.isEmpty)
                   const Box(child: Text('No products yet. Tap "Add product" to list your first item.')),
-                for (final p in s.products)
+                for (final p in s.listed)
                   Box(
                       child: Row(children: [
                     Pic(p.img, w: 50, h: 50, r: 8, fallback: Icons.medication),
@@ -193,15 +218,27 @@ class Inventory extends StatelessWidget {
                     Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(p.name, style: h(16)),
-                      Text(money(p.price), style: h(16, C.green)),
+                      Text('${money(p.price)} • ${p.cat}', style: h(14, C.green)),
+                      if (p.expiry != null) Text('Expires ${fmt(p.expiry!)}', style: const TextStyle(fontSize: 12)),
                     ])),
-                    IconButton(onPressed: () => app.stock(p, -1), icon: const Icon(Icons.remove_circle_outline)),
+                    IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => app.stock(p, -1),
+                        icon: const Icon(Icons.remove_circle_outline)),
                     SizedBox(
-                        width: 34,
+                        width: 30,
                         child: Text('${p.stock}',
                             textAlign: TextAlign.center,
                             style: h(18, p.stock == 0 ? C.brown : C.ink))),
-                    IconButton(onPressed: () => app.stock(p, 1), icon: const Icon(Icons.add_circle_outline)),
+                    IconButton(
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => app.stock(p, 1),
+                        icon: const Icon(Icons.add_circle_outline)),
+                    IconButton(
+                        tooltip: 'Remove product',
+                        visualDensity: VisualDensity.compact,
+                        onPressed: () => removeProductDialog(c, s, p),
+                        icon: Icon(Icons.delete_outline, color: C.brown)),
                   ])),
                 const SizedBox(height: 70),
               ]),
@@ -219,7 +256,7 @@ class Reservations extends StatelessWidget {
         return Column(children: [
           TopHero('Reservations', '${rs.length} from raisers'),
           Expanded(
-            child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
+            child: RList(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
               if (rs.isEmpty)
                 const Box(
                     child: Text(
@@ -234,6 +271,8 @@ class Reservations extends StatelessWidget {
                     Text('${r.product.name} × ${r.qty}', style: h(16)),
                     Text('${r.raiserName} • Paid ${money(r.total)} via ${r.method}',
                         style: const TextStyle(fontSize: 13)),
+                    if (!r.product.available)
+                      Padding(padding: const EdgeInsets.only(top: 4), child: Pill('Not available', C.brown)),
                   ])),
                   r.pickedUp
                       ? Pill('Picked up', C.green)
@@ -255,7 +294,7 @@ class StorePlan extends StatelessWidget {
   Widget build(BuildContext context) => rx((c) => Column(children: [
         const TopHero('My Plan', 'AniCare Store subscription'),
         Expanded(
-          child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
+          child: RList(padding: const EdgeInsets.fromLTRB(14, 0, 14, 16), children: [
             Container(
               padding: const EdgeInsets.all(20),
               margin: const EdgeInsets.only(bottom: 10),
@@ -292,15 +331,111 @@ class StorePlan extends StatelessWidget {
             ])),
             FilledButton.icon(
                 onPressed: () async {
-                  final m = await pay(c, 'AniCare Store – 1 month',
-                      [MapEntry('Monthly subscription', AppState.planPrice)]);
-                  if (m == null || !c.mounted) return;
-                  app.payPlan();
-                  toast(c, 'Plan renewed via $m');
+                  final gref = await pay(c, 'AniCare Store – 1 month',
+                      [MapEntry('Monthly subscription', AppState.planPrice)],
+                      per: 'per month');
+                  if (gref == null || !c.mounted) return;
+                  await app.payPlan('GCash', ref: gref);
+                  if (c.mounted) toast(c, 'Plan renewed. Paid with GCash.');
                 },
                 icon: const Icon(Icons.autorenew),
                 label: const Text('Renew early')),
           ]),
         ),
       ]));
+}
+
+/// Trash button: asks first, then hides the product (history stays, farmers see "Not available").
+Future<void> removeProductDialog(BuildContext c, Store s, Product p) async {
+  final ok = await showDialog<bool>(
+    context: c,
+    builder: (d) => AlertDialog(
+      title: Text('Remove product?', style: h(20)),
+      content: Text(
+          '${p.name} will be removed from your list. Farmers will see it as "Not available" and get a notification. Past reservations stay in the history.'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+        FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(100, 42)),
+            onPressed: () => Navigator.pop(d, true),
+            child: const Text('Remove')),
+      ],
+    ),
+  );
+  if (ok != true) return;
+  await app.removeProduct(s, p);
+  if (c.mounted) toast(c, '${p.name} removed');
+}
+
+/// Add a product: name, category, price, stock and (optional) expiry date.
+Future<void> addProductDialog(BuildContext c, Store s) async {
+  final name = TextEditingController(), price = TextEditingController(), stock = TextEditingController();
+  var cat = 'Vaccine';
+  DateTime? expiry;
+  final ok = await showDialog<bool>(
+    context: c,
+    builder: (d) => StatefulBuilder(
+      builder: (d, set) => AlertDialog(
+        title: Text('Add product', style: h(20)),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            TextField(controller: name, decoration: const InputDecoration(labelText: 'Product name')),
+            const SizedBox(height: 10),
+            DropdownButtonHideUnderline(
+              child: DropdownButton<String>(
+                isExpanded: true,
+                value: cat,
+                dropdownColor: C.surface,
+                items: [
+                  for (final k in ['Vaccine', 'Dewormer', 'Supplement', 'Antibiotic', 'Other'])
+                    DropdownMenuItem(value: k, child: Text(k))
+                ],
+                onChanged: (x) => set(() => cat = x ?? cat),
+              ),
+            ),
+            TextField(
+                controller: price,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Price (₱)')),
+            const SizedBox(height: 10),
+            TextField(
+                controller: stock,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(labelText: 'Stock')),
+            const SizedBox(height: 6),
+            TextButton.icon(
+              onPressed: () async {
+                final x = await showDatePicker(
+                    context: d,
+                    initialDate: DateTime.now().add(const Duration(days: 180)),
+                    firstDate: DateTime.now().subtract(const Duration(days: 365)),
+                    lastDate: DateTime.now().add(const Duration(days: 365 * 5)));
+                if (x != null) set(() => expiry = x);
+              },
+              icon: const Icon(Icons.event),
+              label: Text(expiry == null ? 'Expiry date (optional)' : 'Expires ${fmt(expiry!)}'),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+          FilledButton(
+              style: FilledButton.styleFrom(minimumSize: const Size(90, 42)),
+              onPressed: () => Navigator.pop(d, true),
+              child: const Text('Save')),
+        ],
+      ),
+    ),
+  );
+  if (ok != true || name.text.trim().isEmpty) return;
+  app.addProduct(s, name.text.trim(), double.tryParse(price.text.trim()) ?? 0, int.tryParse(stock.text.trim()) ?? 0,
+      cat: cat, expiry: expiry);
+}
+
+/// The store plan as its own screen (opened from the notification or the "extend?" question).
+class StorePlanPage extends StatelessWidget {
+  const StorePlanPage({super.key});
+  @override
+  Widget build(BuildContext context) =>
+      rx((c) => AppScaffold(bar: subBar('My Plan'), clearH: kHero, body: const StorePlan()));
 }

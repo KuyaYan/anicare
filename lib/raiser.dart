@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'data.dart';
 import 'ui.dart';
-import 'auth.dart';
+import 'gcash.dart';
 
 // ---------------------------------------------------------------- shell
 class RaiserShell extends StatefulWidget {
@@ -55,9 +55,10 @@ class HomeTab extends StatelessWidget {
         final soon = due.where((d) => d.s.date.difference(app.now).inDays <= 7).length;
         return Column(children: [
           TopHero('Good day, ${app.user?.greet ?? ''}',
-              '$soon reminder${soon == 1 ? '' : 's'} due this week'),
+              '$soon reminder${soon == 1 ? '' : 's'} due this week',
+              trailing: cogButton(c)),
           Expanded(
-            child: ListView(padding: const EdgeInsets.fromLTRB(12, 0, 12, 16), children: [
+            child: RList(padding: const EdgeInsets.fromLTRB(12, 0, 12, 16), children: [
               Row(children: [
                 Stat('${app.totalHeads}', 'Animals', C.green),
                 Stat('$soon', 'Due soon', C.amber, fg: C.onAmber),
@@ -123,7 +124,7 @@ class AnimalsTab extends StatelessWidget {
                     context: c, isScrollControlled: true, builder: (_) => const AddAnimalSheet()),
                 icon: const Icon(Icons.add),
                 label: const Text('Add animal')),
-            body: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
+            body: RList(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
               if (app.animals.isEmpty)
                 const Box(child: Text('No animals yet. Tap "Add animal" to start your first record, and a vaccine schedule is created for you.')),
               for (final a in app.animals)
@@ -247,7 +248,7 @@ class AnimalPage extends StatelessWidget {
             ),
             Expanded(
               child: TabBarView(children: [
-                ListView(padding: const EdgeInsets.symmetric(horizontal: 14), children: [
+                RList(padding: const EdgeInsets.symmetric(horizontal: 14), children: [
                   for (final s in a.sched)
                     Box(
                         radius: rSq,
@@ -260,7 +261,15 @@ class AnimalPage extends StatelessWidget {
                             Text(s.done ? 'Done' : 'Due ${fmt(s.date)}'),
                           ])),
                           if (s.done)
-                            Image.asset('assets/img/check_blue.png', width: 26)
+                            IconButton(
+                                tooltip: 'Tap to mark as not done',
+                                padding: EdgeInsets.zero,
+                                constraints: const BoxConstraints(minWidth: 44, minHeight: 44),
+                                onPressed: () {
+                                  app.unmarkDone(a, s);
+                                  toast(c, '${s.label} marked as not done');
+                                },
+                                icon: Image.asset('assets/img/check_blue.png', width: 26))
                           else
                             TextButton(onPressed: () => app.markDone(a, s), child: const Text('Mark done')),
                         ])),
@@ -337,12 +346,12 @@ class _FindState extends State<FindTab> {
         final meds = [
           for (final s in stores)
             for (final p in s.products)
-              if (q.isEmpty || p.name.toLowerCase().contains(q.toLowerCase())) (s, p)
+              if (p.available && (q.isEmpty || p.name.toLowerCase().contains(q.toLowerCase()))) (s, p)
         ];
         return Column(children: [
           const TopHero('Find Care', 'Sorted by distance • Bunawan only'),
           Expanded(
-            child: ListView(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
+            child: RList(padding: const EdgeInsets.fromLTRB(14, 0, 14, 14), children: [
               Container(
                 decoration: BoxDecoration(color: C.pill, borderRadius: BorderRadius.circular(rPill)),
                 padding: const EdgeInsets.all(4),
@@ -395,7 +404,7 @@ class _FindState extends State<FindTab> {
                           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         Text(s.name, style: h(17)),
                         Text('${s.address} • ${s.km} km', style: const TextStyle(fontSize: 13)),
-                        Text('${s.products.length} products listed',
+                        Text('${s.listed.length} products listed',
                             style: TextStyle(color: C.brown, fontWeight: FontWeight.w700)),
                       ])),
                     ]),
@@ -441,7 +450,7 @@ class VetProfile extends StatelessWidget {
   @override
   Widget build(BuildContext context) => rx((c) => AppScaffold(
         bar: subBar('Provider profile'),
-        body: ListView(padding: const EdgeInsets.all(16), children: [
+        body: RList(padding: const EdgeInsets.all(16), children: [
           Center(child: Pic(v.photo, w: 130, h: 130, r: 65, fallback: Icons.person)),
           const SizedBox(height: 10),
           Center(child: TPill(v.name, style: h(22))),
@@ -500,11 +509,11 @@ class _BookState extends State<BookPage> {
       final prem = app.premium;
       final urgent = widget.urgent;
       final visit = urgent ? 0.0 : v.fee * (prem ? 1 - AppState.premDiscount : 1);
-      final svc = (prem || urgent) ? 0.0 : visit * AppState.rate / 2;
+      final svc = (prem || urgent) ? 0.0 : visit * AppState.commissionRate / 2;
       final canFree = prem && app.freeChecks > 0 && !urgent;
       return AppScaffold(
         bar: subBar(widget.urgent ? 'Emergency request' : 'Book ${v.kind == 'Veterinarian' ? 'vet' : 'technician'}'),
-        body: ListView(padding: const EdgeInsets.all(16), children: [
+        body: RList(padding: const EdgeInsets.all(16), children: [
           TPill(v.name, style: h(21)),
           const SizedBox(height: 12),
           Container(
@@ -575,16 +584,19 @@ class _BookState extends State<BookPage> {
                   ? null
                   : () async {
                       final total = useFree ? 0.0 : visit + svc;
-                      String? m = urgent ? 'Free' : 'Premium';
+                      var m = urgent ? 'Free' : 'Demo';
+                      String? gref;
                       if (total > 0) {
-                        m = await pay(c, 'Booking with ${v.name}', [
+                        gref = await pay(c, 'Booking with ${v.name}', [
                           MapEntry('Visit fee', visit),
                           if (svc > 0) MapEntry('AniCare fee (2.5%, other 2.5% paid by vet)', svc),
                         ], note: 'Payment is held and released when both you and the vet confirm the visit is completed.');
+                        if (gref == null || !c.mounted) return;
+                        m = 'GCash';
                       }
-                      if (m == null || !c.mounted) return;
-                      app.book(v, a!, date, time, reason.text.trim(), m,
-                          fee: visit, free: useFree, urgent: widget.urgent);
+                      await app.book(v, a!, date, time, reason.text.trim(), m,
+                          fee: visit, free: useFree, urgent: widget.urgent, ref: gref);
+                      if (!c.mounted) return;
                       Navigator.popUntil(c, (r) => r.isFirst);
                       toast(c, widget.urgent
                           ? 'Emergency request sent to ${v.name}!'
@@ -611,7 +623,7 @@ class StorePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => rx((c) => AppScaffold(
         bar: subBar(s.name),
-        body: ListView(padding: const EdgeInsets.all(16), children: [
+        body: RList(padding: const EdgeInsets.all(16), children: [
           Pic(s.photo, w: double.infinity, h: 150, r: 18, fallback: Icons.store),
           const SizedBox(height: 10),
           TPill('${s.address} • ${s.km} km away'),
@@ -628,7 +640,9 @@ class StorePage extends StatelessWidget {
                   Text(p.cat),
                   Text(money(p.price), style: h(17, C.green)),
                 ])),
-                p.stock == 0
+                !p.available
+                    ? Pill('Not available', C.brown)
+                    : p.stock == 0
                     ? Pill('Out of stock', C.brown)
                     : FilledButton(
                         style: FilledButton.styleFrom(minimumSize: const Size(92, 40)),
@@ -667,10 +681,11 @@ Future<void> reserveDialog(BuildContext c, Store s, Product p) async {
     ),
   );
   if (ok != true || !c.mounted) return;
-  final m = await pay(c, 'Reserve at ${s.name}', [MapEntry('${p.name} × $qty', p.price * qty)],
+  final gref = await pay(c, 'Reserve at ${s.name}', [MapEntry('${p.name} × $qty', p.price * qty)],
       note: 'Pick up at the store with your reservation.');
-  if (m == null || !c.mounted) return;
-  app.reserve(s, p, qty, m);
+  if (gref == null || !c.mounted) return;
+  await app.reserve(s, p, qty, 'GCash', ref: gref);
+  if (!c.mounted) return;
   toast(c, 'Reserved! Show your reservation at ${s.name}.');
 }
 
@@ -691,11 +706,11 @@ class BookingsTab extends StatelessWidget {
                   tabs: const [Tab(text: 'Vet visits'), Tab(text: 'Reservations')])),
           Expanded(
             child: TabBarView(children: [
-              ListView(padding: const EdgeInsets.all(14), children: [
+              RList(padding: const EdgeInsets.all(14), children: [
                 if (app.bookings.isEmpty) const Box(child: Text('No bookings yet.')),
                 for (final b in app.bookings) _booking(c, b),
               ]),
-              ListView(padding: const EdgeInsets.all(14), children: [
+              RList(padding: const EdgeInsets.all(14), children: [
                 if (app.reservations.isEmpty) const Box(child: Text('No reservations yet.')),
                 for (final r in app.reservations)
                   Box(
@@ -707,6 +722,8 @@ class BookingsTab extends StatelessWidget {
                       Text('${r.product.name} × ${r.qty}', style: h(17)),
                       Text('${r.store.name}\nPaid ${money(r.total)} via ${r.method}',
                           style: const TextStyle(fontSize: 13)),
+                      if (!r.product.available)
+                        Padding(padding: const EdgeInsets.only(top: 4), child: Pill('Not available', C.brown)),
                     ])),
                     r.pickedUp ? Pill('Picked up', C.green) : Pill('Reserved', C.d ? const Color(0xFF8FB0F0) : C.navy),
                   ])),
@@ -729,7 +746,7 @@ class BookingsTab extends StatelessWidget {
         const SizedBox(height: 6),
         Text('${b.urgent ? '🚨 ' : ''}${b.animalName} • ${b.reason}'),
         Text('${fmt(b.date)}, ${b.time}', style: TextStyle(color: C.brown, fontWeight: FontWeight.w700)),
-        Text(b.urgent ? 'Emergency – free' : b.free ? 'Free Premium check-up' : 'Paid ${money(b.raiserPays)} via ${b.method ?? '-'}',
+        Text(b.status == BStatus.unpaid ? 'Payment not completed' : b.urgent ? 'Emergency – free' : b.free ? 'Free Premium check-up' : 'Paid ${money(b.raiserPays)} via ${b.method ?? '-'}',
             style: const TextStyle(fontSize: 12)),
         if (open) ...[
           const SizedBox(height: 8),
@@ -767,7 +784,7 @@ class BookingsTab extends StatelessWidget {
             const Text('Rate: '),
             for (var i = 1; i <= 5; i++)
               GestureDetector(
-                  onTap: () => app.rateBooking(b, i),
+                  onTap: () => app.rate(b, i),
                   child: Icon((b.rating ?? 0) >= i ? Icons.star : Icons.star_border, color: C.amber)),
           ]),
       ]),

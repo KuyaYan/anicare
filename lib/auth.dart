@@ -4,6 +4,7 @@ import 'data.dart';
 import 'ui.dart';
 import 'raiser.dart';
 import 'vet.dart';
+import 'admin.dart';
 
 const tagline = 'Connecting Farmers to Animal Care.';
 
@@ -13,12 +14,19 @@ Widget shellFor(Role r) => switch (r) {
       Role.raiser => const RaiserShell(),
       Role.vet => const VetShell(),
       Role.store => const StoreShell(),
+      Role.admin => const AdminShell(),
     };
 
+/// Instant route to the login screen (no fade = no white flash), then clear the session.
+Route<void> instantRoute(Widget page) => PageRouteBuilder<void>(
+    pageBuilder: (_, __, ___) => page,
+    transitionDuration: Duration.zero,
+    reverseTransitionDuration: Duration.zero);
+
 void signOut(BuildContext c) {
-  app.signOut();
-  Navigator.pushAndRemoveUntil(
-      c, MaterialPageRoute(builder: (_) => const LoginPage()), (r) => false);
+  Navigator.pushAndRemoveUntil(c, instantRoute(const LoginPage()), (r) => false);
+  // clear the data only after the login screen is on screen (otherwise the old menus rebuild with empty data)
+  WidgetsBinding.instance.addPostFrameCallback((_) => app.signOut());
 }
 
 Widget brandTitle(double size) => Container(
@@ -207,6 +215,7 @@ class _LoginState extends State<LoginPage> {
         Role.raiser => Icons.agriculture,
         Role.vet => Icons.medical_services_outlined,
         Role.store => Icons.storefront_outlined,
+        Role.admin => Icons.admin_panel_settings_outlined,
       };
 
   @override
@@ -374,9 +383,17 @@ class _CreateState extends State<CreateAccountPage> {
       fee = TextEditingController(text: '350'),
       storeName = TextEditingController(),
       storeAddr = TextEditingController();
+  final pwFocus = FocusNode();
   String kind = 'Veterinarian';
   bool h1 = true, h2 = true, busy = false;
   String? err;
+
+  @override
+  void initState() {
+    super.initState();
+    pwFocus.addListener(() => setState(() {}));
+    pw.addListener(() => setState(() {}));
+  }
 
   String? _validate() {
     if (name.text.trim().length < 3) return 'Please enter your full name.';
@@ -386,7 +403,7 @@ class _CreateState extends State<CreateAccountPage> {
     if (!RegExp(r'^[a-z0-9._]{4,20}$').hasMatch(uname.text.trim().toLowerCase())) {
       return 'Username: 4–20 letters, numbers, dot or underscore.';
     }
-    if (pw.text.length < 8) return 'Password must be at least 8 characters.';
+    if (!PwCheck(pw.text).ok) return pwRuleText;
     if (pw.text != pw2.text) return 'Passwords do not match.';
     if (role == Role.raiser && place.text.trim().isEmpty) return 'Please enter your barangay / farm location.';
     if (role == Role.vet) {
@@ -507,13 +524,17 @@ class _CreateState extends State<CreateAccountPage> {
             _label('Password'),
             TextField(
                 controller: pw,
+                focusNode: pwFocus,
                 obscureText: h1,
-                decoration: _dec('At least 8 characters', Icons.lock_outline,
+                inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'\s')), LengthLimitingTextInputFormatter(32)],
+                decoration: _dec('8–32 characters', Icons.lock_outline,
                     suffix: IconButton(icon: Icon(h1 ? Icons.visibility : Icons.visibility_off, color: C.ink), onPressed: () => setState(() => h1 = !h1)))),
+            if (pwFocus.hasFocus || pw.text.isNotEmpty) pwChecklist(pw.text),
             _label('Confirm Password'),
             TextField(
                 controller: pw2,
                 obscureText: h2,
+                inputFormatters: [FilteringTextInputFormatter.deny(RegExp(r'\s')), LengthLimitingTextInputFormatter(32)],
                 decoration: _dec('Repeat the password', Icons.lock_reset,
                     suffix: IconButton(icon: Icon(h2 ? Icons.visibility : Icons.visibility_off, color: C.ink), onPressed: () => setState(() => h2 = !h2)))),
           ])),
@@ -626,96 +647,5 @@ class _AboutBody extends StatelessWidget {
       Center(child: TPill('Version $kVersion', style: const TextStyle(fontWeight: FontWeight.w700))),
       const SizedBox(height: 12),
     ]);
-  }
-}
-
-// ---------------------------------------------------------------- payment (mock)
-Future<String?> pay(BuildContext c, String title, List<MapEntry<String, double>> lines,
-        {String note = ''}) =>
-    Navigator.push<String>(c, MaterialPageRoute(builder: (_) => PayPage(title, lines, note)));
-
-class PayPage extends StatefulWidget {
-  final String title, note;
-  final List<MapEntry<String, double>> lines;
-  const PayPage(this.title, this.lines, this.note, {super.key});
-  @override
-  State<PayPage> createState() => _PayState();
-}
-
-class _PayState extends State<PayPage> {
-  String m = 'GCash';
-  bool busy = false;
-  static const methods = {
-    'GCash': Color(0xFF0070E0),
-    'Maya': Color(0xFF00A651),
-    'PayPal': Color(0xFF003087),
-  };
-
-  Future<void> _pay() async {
-    setState(() => busy = true);
-    await Future.delayed(const Duration(milliseconds: 1500));
-    if (!mounted) return;
-    Navigator.pop(context, m);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final total = widget.lines.fold(0.0, (s, e) => s + e.value);
-    return rx((c) => AppScaffold(
-          bar: subBar('Checkout'),
-          body: ListView(padding: const EdgeInsets.all(16), children: [
-            TPill(widget.title, style: h(21)),
-            const SizedBox(height: 10),
-            Box(
-                child: Column(children: [
-              for (final l in widget.lines)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Flexible(child: Text(l.key)),
-                    Text(money(l.value)),
-                  ]),
-                ),
-              const Divider(),
-              Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                Text('Total', style: h(18)),
-                Text(money(total), style: h(20, C.green)),
-              ]),
-            ])),
-            if (widget.note.isNotEmpty) Box(child: Text(widget.note, style: const TextStyle(fontSize: 13))),
-            sec('Pay with'),
-            for (final e in methods.entries)
-              Box(
-                onTap: busy ? null : () => setState(() => m = e.key),
-                child: Row(children: [
-                  CircleAvatar(
-                      backgroundColor: e.value,
-                      child: Text(e.key[0],
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700))),
-                  const SizedBox(width: 14),
-                  Expanded(child: Text(e.key, style: h(18))),
-                  Icon(m == e.key ? Icons.radio_button_checked : Icons.radio_button_off,
-                      color: C.green),
-                ]),
-              ),
-            Box(
-                child: Row(children: [
-              Icon(Icons.wifi, size: 16, color: C.ink),
-              const SizedBox(width: 8),
-              const Expanded(
-                  child: Text('Online payment (demo only – no real charge)',
-                      style: TextStyle(fontSize: 12))),
-            ])),
-            const SizedBox(height: 4),
-            FilledButton(
-                onPressed: busy ? null : _pay,
-                child: busy
-                    ? const SizedBox(
-                        width: 22,
-                        height: 22,
-                        child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                    : Text('Pay ${money(total)}')),
-          ]),
-        ));
   }
 }
