@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'data.dart';
+import 'help.dart';
+import 'photos.dart';
 import 'ui.dart';
 
 /// Settings (the cog beside the name): profile, username, password. No photo, no GCash number.
@@ -37,6 +39,10 @@ class _SettingsState extends State<SettingsPage> {
       suffixIcon: suffix,
       fillColor: C.d ? const Color(0xFF263544) : const Color(0xFFF1F3F5));
 
+  Future<void> _pickMine() async {
+    final p = await pickPhoto(context);
+    if (p != null) app.setMyPhoto(p);
+  }
   Widget _msg(String? m, bool ok) => m == null
       ? const SizedBox.shrink()
       : Padding(
@@ -102,8 +108,29 @@ class _SettingsState extends State<SettingsPage> {
 
   @override
   Widget build(BuildContext context) => rx((c) => AppScaffold(
-        bar: subBar('Settings'),
+        bar: subBar('Settings', extra: [
+          IconButton(
+              tooltip: 'Help & Support',
+              icon: const Icon(Icons.help_outline, color: Colors.white),
+              onPressed: () => Navigator.push(c, MaterialPageRoute(builder: (_) => const HelpPage()))),
+        ]),
         body: ListView(padding: const EdgeInsets.all(16), children: [
+          if (app.role == Role.vet || app.role == Role.store)
+            Box(
+                child: Row(children: [
+              Pic(app.role == Role.vet ? app.me.photo : app.myStore.photo,
+                  w: 72, h: 72, r: app.role == Role.vet ? 36 : 14, fallback: app.role == Role.vet ? Icons.person : Icons.store),
+              const SizedBox(width: 14),
+              Expanded(
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(app.role == Role.vet ? 'Profile photo' : 'Shop photo', style: h(18)),
+                const SizedBox(height: 6),
+                OutlinedButton.icon(
+                    onPressed: _pickMine,
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: const Text('Choose from gallery')),
+              ])),
+            ])),
           Box(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text('Profile', style: h(20)),

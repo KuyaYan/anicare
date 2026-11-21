@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'data.dart';
+import 'help.dart';
 import 'notifications.dart';
 import 'ui.dart';
 
@@ -24,6 +25,7 @@ class _AdminState extends State<AdminShell> {
         final tabs = <Widget>[
           const AdminOverview(),
           const AdminPurchases(),
+          const AdminMessages(),
           const AdminVaccines(),
           const AdminAccounts(),
           if (debug) const AdminDebug(),
@@ -42,6 +44,12 @@ class _AdminState extends State<AdminShell> {
               destinations: [
                 const NavigationDestination(icon: Icon(Icons.insights_outlined), label: 'LGU'),
                 const NavigationDestination(icon: Icon(Icons.receipt_long_outlined), label: 'Purchases'),
+                NavigationDestination(
+                    icon: Badge(
+                        isLabelVisible: app.newTickets > 0,
+                        label: Text('${app.newTickets}'),
+                        child: const Icon(Icons.forum_outlined)),
+                    label: 'Messages'),
                 const NavigationDestination(icon: Icon(Icons.medication_outlined), label: 'Vaccines'),
                 const NavigationDestination(icon: Icon(Icons.manage_accounts_outlined), label: 'Accounts'),
                 if (debug) const NavigationDestination(icon: Icon(Icons.bug_report_outlined), label: 'Debug'),

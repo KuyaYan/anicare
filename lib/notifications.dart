@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'data.dart';
+import 'help.dart';
 import 'ui.dart';
 import 'vet.dart';
 
@@ -18,6 +19,10 @@ class NotificationsPage extends StatelessWidget {
         'pay_in' => Icons.account_balance_wallet_outlined,
         'pay_failed' => Icons.error_outline,
         'fee' => Icons.payments_outlined,
+        'ticket_new' => Icons.support_agent,
+        'ticket_reply' => Icons.mark_chat_read_outlined,
+        'ticket_resolved' => Icons.task_alt,
+        'ticket_reopened' => Icons.refresh,
         _ => Icons.notifications_outlined,
       };
 
@@ -75,6 +80,8 @@ class NotificationsPage extends StatelessWidget {
                     app.markRead(n);
                     if (n.payload == 'plan' && app.role == Role.store) {
                       Navigator.push(c, MaterialPageRoute(builder: (_) => const StorePlanPage()));
+                    } else if (n.kind.startsWith('ticket_') && app.role != Role.admin) {
+                      Navigator.push(c, MaterialPageRoute(builder: (_) => const HelpPage()));
                     }
                   },
                   child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [

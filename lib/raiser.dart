@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'data.dart';
 import 'ui.dart';
 import 'gcash.dart';
+import 'photos.dart';
 
 // ---------------------------------------------------------------- shell
 class RaiserShell extends StatefulWidget {
@@ -166,6 +167,8 @@ class _AddState extends State<AddAnimalSheet> {
       count = TextEditingController(text: '10');
   Species sp = Species.hog;
   bool flock = false;
+  String? photo; // optional picture from the gallery
+  bool uploading = false;
 
   @override
   Widget build(BuildContext context) => rx((c) => Padding(
@@ -197,16 +200,31 @@ class _AddState extends State<AddAnimalSheet> {
                   keyboardType: TextInputType.number,
                   decoration: const InputDecoration(labelText: 'Number of heads')),
             const SizedBox(height: 6),
-            OutlinedButton.icon(
-                onPressed: () => toast(context, 'Photo picker is mocked in this prototype'),
-                icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Add photo')),
+            Row(children: [
+              if (photo != null) ...[Pic(photo, w: 56, h: 56, r: 10, fallback: sp.icon), const SizedBox(width: 10)],
+              Expanded(
+                child: OutlinedButton.icon(
+                    onPressed: uploading
+                        ? null
+                        : () async {
+                            setState(() => uploading = true);
+                            final p = await pickPhoto(context);
+                            if (!mounted) return;
+                            setState(() {
+                              uploading = false;
+                              if (p != null) photo = p;
+                            });
+                          },
+                    icon: const Icon(Icons.photo_library_outlined),
+                    label: Text(uploading ? 'Uploading…' : photo == null ? 'Add photo (optional)' : 'Change photo')),
+              ),
+            ]),
             const SizedBox(height: 10),
             FilledButton(
                 onPressed: () {
                   if (name.text.trim().isEmpty) return toast(context, 'Please enter a name');
                   app.addAnimal(name.text.trim(), sp, breed.text.trim(), flock,
-                      int.tryParse(count.text) ?? 1);
+                      int.tryParse(count.text) ?? 1, picked: photo);
                   Navigator.pop(context);
                 },
                 child: const Text('Save & create schedule')),
@@ -228,13 +246,39 @@ class AnimalPage extends StatelessWidget {
                   indicatorColor: Color(0xFFF2A73B),
                   labelColor: Colors.white,
                   unselectedLabelColor: Colors.white70,
-                  tabs: [Tab(text: 'Schedule'), Tab(text: 'Records'), Tab(text: 'Expenses')])),
+                  tabs: [Tab(text: 'Schedule'), Tab(text: 'Records'), Tab(text: 'Expenses')]),
+              extra: [
+                PopupMenuButton<String>(
+                  tooltip: 'Edit or delete',
+                  icon: const Icon(Icons.more_vert),
+                  onSelected: (v) => v == 'edit' ? _edit(c) : _delete(c),
+                  itemBuilder: (_) => const [
+                    PopupMenuItem(value: 'edit', child: Text('Edit animal')),
+                    PopupMenuItem(value: 'delete', child: Text('Delete animal')),
+                  ],
+                ),
+              ]),
           body: Column(children: [
             Padding(
               padding: const EdgeInsets.all(14),
               child: Box(
                   child: Row(children: [
-                Pic(a.photo, w: 80, h: 80, fallback: a.sp.icon),
+                GestureDetector(
+                  onTap: () async {
+                    final p = await pickPhoto(c);
+                    if (p != null) app.setAnimalPhoto(a, p);
+                  },
+                  child: Stack(children: [
+                    Pic(a.photo, w: 80, h: 80, fallback: a.sp.icon),
+                    Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: BoxDecoration(color: C.green, shape: BoxShape.circle),
+                            child: const Icon(Icons.photo_library_outlined, size: 14, color: Colors.white))),
+                  ]),
+                ),
                 const SizedBox(width: 14),
                 Expanded(
                     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -281,6 +325,15 @@ class AnimalPage extends StatelessWidget {
                       Row(children: [
                         Expanded(child: Text(r.title, style: h(17))),
                         Text(fmt(r.date), style: const TextStyle(fontSize: 12)),
+                        if (app.canEditRec(r))
+                          IconButton(
+                              tooltip: 'Edit note',
+                              visualDensity: VisualDensity.compact,
+                              onPressed: () async {
+                                final v = await form(c, 'Edit note', ['Title', 'Note'], initial: [r.title, r.note]);
+                                if (v != null && v[0].isNotEmpty) app.editRecord(r, v[0], v[1]);
+                              },
+                              icon: Icon(Icons.edit_outlined, size: 20, color: C.brown)),
                       ]),
                       const SizedBox(height: 4),
                       Text(r.note),
@@ -304,6 +357,25 @@ class AnimalPage extends StatelessWidget {
                         Text(fmt(e.date), style: const TextStyle(fontSize: 12)),
                       ])),
                       Text(money(e.amount), style: h(17, C.green)),
+                      IconButton(
+                          tooltip: 'Edit expense',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () async {
+                            final v = await form(c, 'Edit expense', ['Item', 'Amount (₱)'],
+                                numeric: {1}, initial: [e.item, e.amount.toStringAsFixed(2)]);
+                            final amt = v == null ? null : double.tryParse(v[1]);
+                            if (v != null && v[0].isNotEmpty && amt != null) app.editExpense(e, v[0], amt);
+                          },
+                          icon: Icon(Icons.edit_outlined, size: 20, color: C.brown)),
+                      IconButton(
+                          tooltip: 'Delete expense',
+                          visualDensity: VisualDensity.compact,
+                          onPressed: () async {
+                            if (await confirmDelete(c, 'Delete expense?', '${e.item} (${money(e.amount)}) will be removed.')) {
+                              app.deleteExpense(a, e);
+                            }
+                          },
+                          icon: Icon(Icons.delete_outline, size: 20, color: C.brown)),
                     ])),
                 ], () async {
                   final v = await form(c, 'Add expense', ['Item', 'Amount (₱)'], numeric: {1});
@@ -318,6 +390,24 @@ class AnimalPage extends StatelessWidget {
         ),
       ));
 
+  Future<void> _edit(BuildContext c) async {
+    final v = await form(c, 'Edit animal', ['Name / tag', 'Breed', if (a.flock) 'Number of heads'],
+        numeric: {2}, initial: [a.name, a.breed, if (a.flock) '${a.count}']);
+    if (v == null || !c.mounted) return;
+    if (v[0].isEmpty) return toast(c, 'Please enter a name');
+    app.editAnimal(a, v[0], v[1], a.flock ? (int.tryParse(v[2]) ?? a.count) : 1);
+    if (c.mounted) toast(c, 'Animal updated');
+  }
+
+  Future<void> _delete(BuildContext c) async {
+    final yes = await confirmDelete(c, 'Delete ${a.name}?',
+        'Its schedule, health records and expenses are deleted too. This cannot be undone.');
+    if (!yes || !c.mounted) return;
+    final ok = await app.deleteAnimal(a);
+    if (!c.mounted) return;
+    toast(c, ok ? '${a.name} deleted' : 'Could not delete. Please check your connection.');
+    if (ok) Navigator.pop(c);
+  }
   Widget _list(String btn, List<Widget> items, VoidCallback add) => ListView(
         padding: const EdgeInsets.fromLTRB(14, 0, 14, 20),
         children: [

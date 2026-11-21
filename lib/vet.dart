@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'data.dart';
 import 'ui.dart';
 import 'gcash.dart';
+import 'photos.dart';
 
 // ---------------------------------------------------------------- vet shell
 class VetShell extends StatefulWidget {
@@ -109,9 +110,14 @@ Widget _card(BuildContext c, Booking b) => Box(
           TextButton.icon(
               onPressed: () async {
                 final v = await form(c, 'Record visit – ${b.animalName}', ['Diagnosis / treatment', 'Notes']);
-                if (v != null && v[0].isNotEmpty) {
-                  app.addRecord(b.animal!, Rec(0, app.now, v[0], v[1], app.me.name));
+                if (v == null || v[0].isEmpty || !c.mounted) return;
+                try {
+                  await app.addRecord(b.animal!, Rec(0, app.now, v[0], v[1], app.me.name));
                   if (c.mounted) toast(c, 'Saved to ${b.animalName}\'s health record');
+                } catch (_) {
+                  if (c.mounted) {
+                    toast(c, 'Could not save the record. Check your connection or Supabase permissions.');
+                  }
                 }
               },
               icon: const Icon(Icons.edit_note),
@@ -216,11 +222,18 @@ class Inventory extends StatelessWidget {
                     Pic(p.img, w: 50, h: 50, r: 8, fallback: Icons.medication),
                     const SizedBox(width: 10),
                     Expanded(
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      Text(p.name, style: h(16)),
-                      Text('${money(p.price)} • ${p.cat}', style: h(14, C.green)),
-                      if (p.expiry != null) Text('Expires ${fmt(p.expiry!)}', style: const TextStyle(fontSize: 12)),
-                    ])),
+                        child: InkWell(
+                      onTap: () => addProductDialog(c, s, edit: p),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Row(children: [
+                          Flexible(child: Text(p.name, style: h(16))),
+                          const SizedBox(width: 4),
+                          Icon(Icons.edit_outlined, size: 14, color: C.brown),
+                        ]),
+                        Text('${money(p.price)} • ${p.cat}', style: h(14, C.green)),
+                        if (p.expiry != null) Text('Expires ${fmt(p.expiry!)}', style: const TextStyle(fontSize: 12)),
+                      ]),
+                    )),
                     IconButton(
                         visualDensity: VisualDensity.compact,
                         onPressed: () => app.stock(p, -1),
@@ -368,15 +381,20 @@ Future<void> removeProductDialog(BuildContext c, Store s, Product p) async {
 }
 
 /// Add a product: name, category, price, stock and (optional) expiry date.
-Future<void> addProductDialog(BuildContext c, Store s) async {
-  final name = TextEditingController(), price = TextEditingController(), stock = TextEditingController();
-  var cat = 'Vaccine';
-  DateTime? expiry;
+Future<void> addProductDialog(BuildContext c, Store s, {Product? edit}) async {
+  const cats = ['Vaccine', 'Dewormer', 'Supplement', 'Antibiotic', 'Other'];
+  final name = TextEditingController(text: edit?.name ?? ''),
+      price = TextEditingController(text: edit == null ? '' : edit.price.toString()),
+      stock = TextEditingController(text: edit == null ? '' : '${edit.stock}');
+  var cat = edit != null && cats.contains(edit.cat) ? edit.cat : (edit == null ? 'Vaccine' : 'Other');
+  DateTime? expiry = edit?.expiry;
+  String? photo; // optional picture from the gallery
+  var up = false;
   final ok = await showDialog<bool>(
     context: c,
     builder: (d) => StatefulBuilder(
       builder: (d, set) => AlertDialog(
-        title: Text('Add product', style: h(20)),
+        title: Text(edit == null ? 'Add product' : 'Edit product', style: h(20)),
         content: SingleChildScrollView(
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             TextField(controller: name, decoration: const InputDecoration(labelText: 'Product name')),
@@ -387,7 +405,7 @@ Future<void> addProductDialog(BuildContext c, Store s) async {
                 value: cat,
                 dropdownColor: C.surface,
                 items: [
-                  for (final k in ['Vaccine', 'Dewormer', 'Supplement', 'Antibiotic', 'Other'])
+                  for (final k in cats)
                     DropdownMenuItem(value: k, child: Text(k))
                 ],
                 onChanged: (x) => set(() => cat = x ?? cat),
@@ -415,6 +433,28 @@ Future<void> addProductDialog(BuildContext c, Store s) async {
               icon: const Icon(Icons.event),
               label: Text(expiry == null ? 'Expiry date (optional)' : 'Expires ${fmt(expiry!)}'),
             ),
+            TextButton.icon(
+              onPressed: up
+                  ? null
+                  : () async {
+                      set(() => up = true);
+                      final p = await pickPhoto(d);
+                      if (!d.mounted) return;
+                      set(() {
+                        up = false;
+                        if (p != null) photo = p;
+                      });
+                    },
+              icon: const Icon(Icons.photo_library_outlined),
+              label: Text(up
+                  ? 'Uploading…'
+                  : photo != null
+                      ? 'Photo added, tap to change'
+                      : edit == null
+                          ? 'Photo (optional)'
+                          : 'Change photo'),
+            ),
+            if (photo != null || edit?.img != null) Pic(photo ?? edit?.img, w: 80, h: 80, r: 12),
           ]),
         ),
         actions: [
@@ -428,8 +468,19 @@ Future<void> addProductDialog(BuildContext c, Store s) async {
     ),
   );
   if (ok != true || name.text.trim().isEmpty) return;
+  if (edit != null) {
+    app.editProduct(edit,
+        name: name.text.trim(),
+        price: double.tryParse(price.text.trim()) ?? edit.price,
+        stock: int.tryParse(stock.text.trim()) ?? edit.stock,
+        cat: cat,
+        expiry: expiry,
+        photo: photo);
+    if (c.mounted) toast(c, 'Product updated');
+    return;
+  }
   app.addProduct(s, name.text.trim(), double.tryParse(price.text.trim()) ?? 0, int.tryParse(stock.text.trim()) ?? 0,
-      cat: cat, expiry: expiry);
+      cat: cat, expiry: expiry, photo: photo);
 }
 
 /// The store plan as its own screen (opened from the notification or the "extend?" question).

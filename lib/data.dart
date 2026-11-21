@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'config.dart';
 import 'db.dart';
@@ -275,6 +276,21 @@ class AppNotification {
   AppNotification(this.id, this.kind, this.title, this.body, this.at, this.read, this.payload);
 }
 
+/// A Help & Support ticket (farmer / vet / shop owner -> admin).
+class Ticket {
+  final int id, userId;
+  final String senderName, senderRole, senderPhone, topic, subject, body;
+  bool open; // false = resolved
+  final DateTime created;
+  DateTime updated;
+  String reply;
+  DateTime? replied;
+  bool adminSeen;
+  Ticket(this.id, this.userId, this.senderName, this.senderRole, this.senderPhone, this.topic, this.subject,
+      this.body, this.open, this.created, this.updated, this.reply, this.replied, this.adminSeen);
+  String get roleLabel =>
+      switch (senderRole) { 'raiser' => 'Farmer', 'vet' => 'Vet', 'store' => 'Shop owner', _ => senderRole };
+}
 class Due {
   final Animal a;
   final Sched s;
@@ -306,6 +322,7 @@ class AppState extends ChangeNotifier {
   List<Booking> _bookings = [];
   List<Reservation> _reservations = [];
   List<Payment> _payments = [];
+  List<Ticket> _tickets = [];
 
   // notifications (bell list + phone notifications)
   List<AppNotification> notes = [];
@@ -375,6 +392,7 @@ class AppState extends ChangeNotifier {
     _bookings = [];
     _reservations = [];
     _payments = [];
+    _tickets = [];
   }
 
   Future<void> _loadAll() async {
@@ -487,6 +505,33 @@ class AppState extends ChangeNotifier {
             (r['payee'] ?? '') as String, (r['item'] ?? '') as String, _d(r['amount']),
             (r['method'] ?? '') as String, (r['status'] ?? '') as String, _dt(r['at']), (r['ref'] ?? '') as String))
         .toList();
+    await _loadTickets();
+  }
+
+  /// Help & Support tickets (a user gets only his own, the admin gets all: Supabase row-level security).
+  Future<void> _loadTickets() async {
+    try {
+      final rows = await repo.query('tickets', orderBy: 'id DESC');
+      _tickets = rows
+          .map((r) => Ticket(
+              _i(r['id']),
+              _i(r['user_id']),
+              (r['sender_name'] ?? '') as String,
+              (r['sender_role'] ?? '') as String,
+              (r['sender_phone'] ?? '') as String,
+              (r['topic'] ?? '') as String,
+              (r['subject'] ?? '') as String,
+              (r['body'] ?? '') as String,
+              (r['status'] ?? 'open') == 'open',
+              _dt(r['created']),
+              _dt(r['updated'] ?? r['created']),
+              (r['reply'] ?? '') as String,
+              r['replied'] == null ? null : _dt(r['replied']),
+              r['admin_seen'] == null ? false : _b(r['admin_seen'])))
+          .toList();
+    } catch (_) {
+      _tickets = [];
+    }
   }
 
   /// Pull-to-refresh: re-read everything (this is how phones sync with Supabase).
@@ -680,8 +725,8 @@ class AppState extends ChangeNotifier {
 
   DateTime _day(int days) => DateTime(now.year, now.month, now.day).add(Duration(days: days));
 
-  Future<void> addAnimal(String name, Species sp, String breed, bool flock, int count) async {
-    final photo = sp.newPhoto;
+  Future<void> addAnimal(String name, Species sp, String breed, bool flock, int count, {String? picked}) async {
+    final photo = picked ?? sp.newPhoto;
     final id = await repo.insert('animals', {
       'owner_id': user!.id, 'name': name, 'breed': breed, 'species': sp.name,
       'flock': flock ? 1 : 0, 'heads': flock ? count : 1, 'photo': photo,
@@ -697,6 +742,26 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- photos (gallery -> Supabase Storage, or the phone in offline mode)
+  Future<String> savePhoto(Uint8List bytes) => repo.uploadPhoto(bytes);
+
+  void setAnimalPhoto(Animal a, String photo) {
+    a.photo = photo;
+    _u('animals', a.id, {'photo': photo});
+    notifyListeners();
+  }
+
+  /// Vet = profile photo, shop owner = shop photo.
+  void setMyPhoto(String photo) {
+    if (role == Role.vet) {
+      me.photo = photo;
+      _u('vets', me.id, {'photo': photo});
+    } else if (role == Role.store) {
+      myStore.photo = photo;
+      _u('stores', myStore.id, {'photo': photo});
+    }
+    notifyListeners();
+  }
   Future<void> markDone(Animal a, Sched s) async {
     s.done = true;
     _u('schedules', s.id, {'done': 1});
@@ -729,6 +794,75 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ---- 1.3.2: edit / delete
+  /// Edit name, breed and (for a flock) the number of heads.
+  void editAnimal(Animal a, String name, String breed, int count) {
+    a.name = name;
+    a.breed = breed;
+    if (a.flock) a.count = count < 1 ? 1 : count;
+    _u('animals', a.id, {'name': name, 'breed': breed, 'heads': a.flock ? a.count : 1});
+    notifyListeners();
+  }
+
+  /// Delete the animal with its schedule, records and expenses. Returns false if it could not be deleted.
+  Future<bool> deleteAnimal(Animal a) async {
+    try {
+      await repo.remove('animals', 'id', a.id);
+    } catch (e) {
+      return false;
+    }
+    // the phone's SQLite has no cascade, so clean up the children too (Supabase already did it)
+    for (final t in ['schedules', 'records', 'expenses']) {
+      try {
+        await repo.remove(t, 'animal_id', a.id);
+      } catch (e) {
+        // Supabase deletes the children itself; local cleanup is best-effort.
+      }
+    }
+    _animals.removeWhere((x) => x.id == a.id);
+    notifyListeners();
+    return true;
+  }
+
+  /// A farmer may edit only his own notes (not notes written by a vet, and not the automatic "Marked done" note).
+  bool canEditRec(Rec r) => r.by == 'Raiser' && r.note != 'Marked done by raiser.';
+
+  void editRecord(Rec r, String title, String note) {
+    r.title = title;
+    r.note = note;
+    _u('records', r.id, {'title': title, 'note': note});
+    notifyListeners();
+  }
+
+  void editExpense(Exp e, String item, double amount) {
+    e.item = item;
+    e.amount = amount;
+    _u('expenses', e.id, {'item': item, 'amount': amount});
+    notifyListeners();
+  }
+
+  void deleteExpense(Animal a, Exp e) {
+    a.exps.removeWhere((x) => x.id == e.id);
+    unawaited(repo.remove('expenses', 'id', e.id).catchError((Object err) {}));
+    notifyListeners();
+  }
+
+  /// Shop owner edits a product (a new photo is optional; without one the old picture stays).
+  void editProduct(Product p,
+      {required String name, required double price, required int stock, required String cat, DateTime? expiry, String? photo}) {
+    p.name = name;
+    p.price = price;
+    p.stock = stock < 0 ? 0 : stock;
+    p.cat = cat;
+    p.expiry = expiry;
+    if (photo != null) p.img = photo;
+    _u('products', p.id, {
+      'name': name, 'price': price, 'stock': p.stock, 'cat': cat,
+      'expiry': expiry == null ? null : _ms(expiry),
+      if (photo != null) 'img': photo,
+    });
+    notifyListeners();
+  }
   // ---- payments (feeds the admin's purchases screen)
   Future<void> _recordPayment(String kind, int ref, String payer, String payee, String item, double amount,
       String method, String status,
@@ -846,8 +980,8 @@ class AppState extends ChangeNotifier {
   }
 
   Future<void> addProduct(Store s, String name, double price, int stock,
-      {String cat = 'Other', DateTime? expiry}) async {
-    final img = _prodPool[s.products.length % _prodPool.length];
+      {String cat = 'Other', DateTime? expiry, String? photo}) async {
+    final img = photo ?? _prodPool[s.products.length % _prodPool.length];
     final id = await repo.insert('products', {
       'store_id': s.id, 'name': name, 'cat': cat, 'price': price, 'stock': stock, 'img': img,
       'expiry': expiry == null ? null : _ms(expiry),
@@ -903,6 +1037,95 @@ class AppState extends ChangeNotifier {
   static String money0(num v) => '₱${v.toStringAsFixed(v == v.roundToDouble() ? 0 : 2)}';
 
   /// Runs after every login / app start: loads the bell list and starts checking for new alerts.
+  // ---- Help & Support
+  List<Ticket> get myTickets => _tickets.where((t) => t.userId == user?.id).toList();
+  List<Ticket> get allTickets => _tickets;
+  int get newTickets => _tickets.where((t) => !t.adminSeen).length; // admin: not opened yet
+
+  /// Farmer / vet / shop owner sends a ticket (max 3 open at the same time).
+  Future<String?> sendTicket(String topic, String subject, String body) async {
+    final u = user!;
+    if (subject.trim().length < 3) return 'Please type a short subject.';
+    if (body.trim().length < 10) return 'Please describe the problem (at least 10 characters).';
+    if (myTickets.where((t) => t.open).length >= 3) {
+      return 'You already have 3 open tickets. Please wait until support resolves one.';
+    }
+    final at = DateTime.now();
+    try {
+      final id = await repo.insert('tickets', {
+        'user_id': u.id, 'sender_name': u.fullName, 'sender_role': u.role.name, 'sender_phone': u.phone,
+        'topic': topic, 'subject': subject.trim(), 'body': body.trim(), 'status': 'open',
+        'created': _ms(at), 'updated': _ms(at), 'reply': null, 'replied': null, 'admin_seen': 0,
+      });
+      final t = Ticket(id, u.id, u.fullName, u.role.name, u.phone, topic, subject.trim(), body.trim(), true, at, at,
+          '', null, false);
+      _tickets.insert(0, t);
+      for (final a in _users) {
+        if (a.role == Role.admin) {
+          unawaited(_notifyLocal(a.id, 'ticket_new', 'New help request',
+              '${u.fullName} (${t.roleLabel}): ${t.subject}', payload: 'bell'));
+        }
+      }
+      notifyListeners();
+      return null;
+    } catch (e) {
+      return e.toString().contains('3 open')
+          ? 'You already have 3 open tickets. Please wait until support resolves one.'
+          : 'Could not send. Check your connection and try again.';
+    }
+  }
+
+  /// Admin opened the message.
+  void ticketSeen(Ticket t) {
+    if (t.adminSeen) return;
+    t.adminSeen = true;
+    _u('tickets', t.id, {'admin_seen': 1});
+    notifyListeners();
+  }
+
+  Future<bool> replyTicket(Ticket t, String text) async {
+    final at = DateTime.now();
+    final r = text.trim();
+    try {
+      await repo.update('tickets', t.id, {'reply': r, 'replied': _ms(at), 'updated': _ms(at), 'admin_seen': 1});
+    } catch (_) {
+      return false;
+    }
+    t.reply = r;
+    t.replied = at;
+    t.updated = at;
+    t.adminSeen = true;
+    unawaited(_notifyLocal(t.userId, 'ticket_reply', 'Reply from AniCare support', 'Re: ${t.subject} – $r',
+        payload: 'bell'));
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> setTicketOpen(Ticket t, bool open) async {
+    final at = DateTime.now();
+    try {
+      await repo.update('tickets', t.id, {'status': open ? 'open' : 'resolved', 'updated': _ms(at)});
+    } catch (_) {
+      return false;
+    }
+    t.open = open;
+    t.updated = at;
+    unawaited(_notifyLocal(t.userId, open ? 'ticket_reopened' : 'ticket_resolved',
+        open ? 'Ticket reopened' : 'Ticket resolved', t.subject, payload: 'bell'));
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> deleteTicket(Ticket t) async {
+    try {
+      await repo.remove('tickets', 'id', t.id);
+    } catch (_) {
+      return false;
+    }
+    _tickets.remove(t);
+    notifyListeners();
+    return true;
+  }
   Future<void> _afterLogin() async {
     try {
       await _loadNotes();
@@ -914,6 +1137,7 @@ class AppState extends ChangeNotifier {
         if (user == null) return;
         try {
           await _loadNotes();
+          await _loadTickets();
           notifyListeners();
         } catch (_) {}
       });

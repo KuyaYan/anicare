@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'dart:typed_data';
+import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'config.dart';
@@ -24,6 +27,7 @@ abstract class Repo {
   Future<void> rpc(String fn, Map<String, dynamic> params);
   Future<String?> rpcText(String fn);
   Future<void> remove(String table, String col, int value);
+  Future<String> uploadPhoto(Uint8List bytes);
   Future<String?> updatePassword(String newPassword);
 }
 
@@ -82,6 +86,14 @@ class LocalRepo implements Repo {
   @override
   Future<void> remove(String table, String col, int value) async {
     await db.delete(table, where: '$col=?', whereArgs: [value]);
+  }
+  /// offline mode: the picture is saved inside the app's own folder on the phone
+  @override
+  Future<String> uploadPhoto(Uint8List bytes) async {
+    final dir = await getApplicationDocumentsDirectory();
+    final f = File('${dir.path}/photo_${DateTime.now().millisecondsSinceEpoch}.jpg');
+    await f.writeAsBytes(bytes);
+    return f.path;
   }
   @override
   Future<String?> updatePassword(String newPassword) async => null;
@@ -230,6 +242,20 @@ class SupabaseRepo implements Repo {
     }
   }
 
+  /// uploads to the Storage bucket (one folder per signed-in user) and returns the public address
+  @override
+  Future<String> uploadPhoto(Uint8List bytes) async {
+    try {
+      final path = '${c.auth.currentUser?.id ?? 'anon'}/${DateTime.now().millisecondsSinceEpoch}.jpg';
+      await c.storage
+          .from(kPhotoBucket)
+          .uploadBinary(path, bytes, fileOptions: const FileOptions(contentType: 'image/jpeg', upsert: true));
+      return c.storage.from(kPhotoBucket).getPublicUrl(path);
+    } catch (e) {
+      _fail(e);
+      rethrow;
+    }
+  }
   @override
   Future<String?> updatePassword(String newPassword) async {
     try {

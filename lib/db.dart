@@ -17,12 +17,13 @@ String hashPw(String pw, String salt) => sha256.convert(utf8.encode('$salt:$pw')
 /// Opens (and on first run creates + seeds) the on-device SQLite database.
 Future<Database> openAppDb() async {
   final path = p.join(await getDatabasesPath(), 'anicare.db');
-  return openDatabase(path, version: 4, onCreate: (db, v) async {
+  return openDatabase(path, version: 5, onCreate: (db, v) async {
     await _schema(db);
     await _seed(db);
     await _seedV2(db);
     await _upgradeV3(db);
     await _upgradeV4(db);
+    await _upgradeV5(db);
   }, onUpgrade: (db, oldV, newV) async {
     if (oldV < 2) {
       // version 5.x -> 6.0.0: admin account, payments, expiry dates, account on/off switch
@@ -33,6 +34,7 @@ Future<Database> openAppDb() async {
     }
     if (oldV < 3) await _upgradeV3(db);
     if (oldV < 4) await _upgradeV4(db);
+    if (oldV < 5) await _upgradeV5(db);
   });
 }
 
@@ -250,4 +252,11 @@ Future<void> _upgradeV4(Database db) async {
   await db.execute("UPDATE bookings SET method='GCash' WHERE method='Maya'");
   await db.execute("UPDATE payments SET method='GCash' WHERE method='Maya'");
   await db.execute("UPDATE reservations SET method='GCash' WHERE method='Maya'");
+}
+/// 1.3.1: Help & Support tickets
+Future<void> _upgradeV5(Database db) async {
+  await db.execute('''CREATE TABLE tickets (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER,
+       sender_name TEXT, sender_role TEXT, sender_phone TEXT, topic TEXT, subject TEXT, body TEXT,
+       status TEXT NOT NULL DEFAULT 'open', created INTEGER, updated INTEGER, reply TEXT, replied INTEGER,
+       admin_seen INTEGER NOT NULL DEFAULT 0)''');
 }

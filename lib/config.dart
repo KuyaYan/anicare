@@ -11,5 +11,7 @@
 //     kSupabaseAnonKey = "anon / public key"  (the long eyJ... text)
 //  Full steps: see supabase-and-maya-guide.md
 // ============================================================================
-const String kSupabaseUrl = '';
-const String kSupabaseAnonKey = '';
+const String kSupabaseUrl = 'https://trqioxrzirftyldwpsso.supabase.co';
+const String kSupabaseAnonKey = 'sb_publishable_PGFKTuh2ZFI5E3Z4jFW7vQ_8FlbXtJO';
+// Supabase Storage bucket for animal / vet / shop / product photos (created in the Supabase steps)
+const String kPhotoBucket = 'photos';

@@ -166,27 +166,8 @@ class LoginPage extends StatefulWidget {
 
 class _LoginState extends State<LoginPage> {
   final user = TextEditingController(), pass = TextEditingController();
-  final focus = FocusNode();
   bool hide = true, busy = false;
   String? err;
-
-  @override
-  void initState() {
-    super.initState();
-    focus.addListener(() => setState(() {}));
-    user.addListener(() => setState(() {}));
-  }
-
-  @override
-  void dispose() {
-    focus.dispose();
-    super.dispose();
-  }
-
-  List<Account> get _options {
-    final t = user.text.trim().toLowerCase();
-    return accounts.where((a) => t.isEmpty || a.user.contains(t)).toList();
-  }
 
   Future<void> _login() async {
     setState(() => busy = true);
@@ -211,13 +192,6 @@ class _LoginState extends State<LoginPage> {
     }
   }
 
-  IconData _ic(Role r) => switch (r) {
-        Role.raiser => Icons.agriculture,
-        Role.vet => Icons.medical_services_outlined,
-        Role.store => Icons.storefront_outlined,
-        Role.admin => Icons.admin_panel_settings_outlined,
-      };
-
   @override
   Widget build(BuildContext context) => rx((c) => Scaffold(
         backgroundColor: C.surface,
@@ -239,7 +213,6 @@ class _LoginState extends State<LoginPage> {
                       const SizedBox(height: 22),
                       TextField(
                         controller: user,
-                        focusNode: focus,
                         textInputAction: TextInputAction.next,
                         autocorrect: false,
                         style: TextStyle(color: C.ink),
@@ -247,29 +220,7 @@ class _LoginState extends State<LoginPage> {
                             hintText: 'Username',
                             prefixIcon: Icon(Icons.person_outline, color: C.ink)),
                       ),
-                      // autofill options (the 3 test accounts) appear while the username box is focused
-                      if (focus.hasFocus && _options.isNotEmpty)
-                        Container(
-                          margin: const EdgeInsets.only(top: 6),
-                          decoration: BoxDecoration(color: C.surface, borderRadius: BorderRadius.circular(rPill)),
-                          child: Column(children: [
-                            for (final a in _options)
-                              ListTile(
-                                dense: true,
-                                leading: Icon(_ic(a.role), color: C.green),
-                                title: Text(a.user, style: const TextStyle(fontWeight: FontWeight.w700)),
-                                subtitle: Text(a.label),
-                                onTap: () {
-                                  setState(() {
-                                    user.text = a.user;
-                                    pass.text = kPassword;
-                                    err = null;
-                                  });
-                                  focus.unfocus();
-                                },
-                              ),
-                          ]),
-                        ),
+
                       const SizedBox(height: 10),
                       TextField(
                         controller: pass,
@@ -322,25 +273,6 @@ class _LoginState extends State<LoginPage> {
                             child: Text('Create Account',
                                 style: TextStyle(color: C.green, fontWeight: FontWeight.w800)),
                           ),
-                        ]),
-                      ),
-                      const SizedBox(height: 14),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(color: C.pill, borderRadius: BorderRadius.circular(rPill)),
-                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('Test accounts', style: h(18)),
-                          const SizedBox(height: 6),
-                          for (final a in accounts)
-                            Padding(
-                                padding: const EdgeInsets.symmetric(vertical: 2),
-                                child: Text('${a.label}:  ${a.user}')),
-                          const SizedBox(height: 4),
-                          Text('Password (all): $kPassword',
-                              style: const TextStyle(fontWeight: FontWeight.w700)),
-                          const SizedBox(height: 4),
-                          const Text('Tap the username box to autofill one.', style: TextStyle(fontSize: 12)),
                         ]),
                       ),
                       const SizedBox(height: 14),

@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'data.dart';
@@ -23,7 +24,7 @@ class C {
 }
 
 /// App version (keep in sync with pubspec.yaml)
-const String kVersion = '1.3.0';
+const String kVersion = '1.3.2';
 
 const double kHero = 138; // clear (un-blurred) part of the background
 const double kAd = 56;
@@ -331,11 +332,11 @@ PreferredSizeWidget mainBar(BuildContext c) {
   );
 }
 
-PreferredSizeWidget subBar(String t, {PreferredSizeWidget? bottom}) => AppBar(
+PreferredSizeWidget subBar(String t, {PreferredSizeWidget? bottom, List<Widget> extra = const []}) => AppBar(
       title: Text(t),
       backgroundColor: C.bar,
       foregroundColor: Colors.white,
-      actions: const [ThemeToggle(), SizedBox(width: 4)],
+      actions: [...extra, const ThemeToggle(), const SizedBox(width: 4)],
       bottom: bottom,
     );
 
@@ -484,8 +485,18 @@ class Pic extends StatelessWidget {
         borderRadius: BorderRadius.circular(r),
         child: path == null
             ? ph
-            : Image.asset(path!,
-                width: w, height: h, fit: BoxFit.cover, errorBuilder: (_, __, ___) => ph));
+            : path!.startsWith('http')
+                ? Image.network(path!,
+                    width: w,
+                    height: h,
+                    fit: BoxFit.cover,
+                    errorBuilder: (_, __, ___) => ph,
+                    loadingBuilder: (_, child, prog) => prog == null ? child : ph)
+                : path!.startsWith('/')
+                    ? Image.file(File(path!),
+                        width: w, height: h, fit: BoxFit.cover, errorBuilder: (_, __, ___) => ph)
+                    : Image.asset(path!,
+                        width: w, height: h, fit: BoxFit.cover, errorBuilder: (_, __, ___) => ph));
   }
 }
 
@@ -517,8 +528,11 @@ class Stat extends StatelessWidget {
 
 /// Small text form dialog. Returns the entered values or null.
 Future<List<String>?> form(BuildContext c, String title, List<String> labels,
-    {Set<int> numeric = const {}}) {
-  final ctrls = [for (final _ in labels) TextEditingController()];
+    {Set<int> numeric = const {}, List<String>? initial}) {
+  final ctrls = [
+    for (var i = 0; i < labels.length; i++)
+      TextEditingController(text: initial != null && i < initial.length ? initial[i] : '')
+  ];
   return showDialog<List<String>>(
     context: c,
     builder: (d) => AlertDialog(
@@ -548,6 +562,24 @@ Future<List<String>?> form(BuildContext c, String title, List<String> labels,
   );
 }
 
+/// Asks "are you sure?" before a delete. Returns true only when the user taps the red button.
+Future<bool> confirmDelete(BuildContext c, String title, String message, {String yes = 'Delete'}) async {
+  final ok = await showDialog<bool>(
+    context: c,
+    builder: (d) => AlertDialog(
+      title: Text(title, style: h(20)),
+      content: Text(message),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(d, false), child: const Text('Cancel')),
+        FilledButton(
+            style: FilledButton.styleFrom(minimumSize: const Size(100, 42), backgroundColor: const Color(0xFFB3261E)),
+            onPressed: () => Navigator.pop(d, true),
+            child: Text(yes)),
+      ],
+    ),
+  );
+  return ok == true;
+}
 /// Back-button handling for the 3 main menus.
 /// - not on Home tab: back goes to Home tab
 /// - on Home tab: shows "log out or quit?" message (stays until a button is pressed)
